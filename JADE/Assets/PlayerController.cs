@@ -18,12 +18,11 @@ public class PlayerController : MonoBehaviour
     [SerializeField] private float moveSpeed = 5f;
     [SerializeField] private float jumpForce = 5f;
 
-    [Header("ジェット（J）設定")]
-    [SerializeField] private float jetUpSpeed = 5f; // 上昇力
-    // ▼▼▼ 追加：燃料の設定 ▼▼▼
-    [SerializeField] private float maxJetDuration = 1.0f; // 何秒飛べるか
-    private float currentJetFuel; // 今の残り燃料
-    // ▲▲▲ ▲▲▲
+    [Header("ワープ（J）設定")]
+    [SerializeField] private float warpDistance = 3.0f; // ワープする距離
+    [SerializeField] private float warpCooldown = 1.0f; // クールタイム
+    private float nextWarpTime = 0f;
+    [SerializeField] private LayerMask wallLayer; // 壁のレイヤー（埋まり防止用
 
     [Header("ダッシュ設定")]
     [SerializeField] private float dashSpeed = 15f;
@@ -56,8 +55,7 @@ public class PlayerController : MonoBehaviour
         
         currentHP = maxHP;
         if (GameManager.instance != null) GameManager.instance.UpdateHP(currentHP);
-        // ▼▼▼ 追加：最初は燃料満タン ▼▼▼
-        currentJetFuel = maxJetDuration;
+     
     }
 
     void Update()
@@ -94,26 +92,14 @@ public class PlayerController : MonoBehaviour
             rb.AddForce(Vector2.up * jumpForce, ForceMode2D.Impulse);
         }
 
-       // ▼▼▼ 4. ジェット (J) 燃料制限付き ▼▼▼
-        // Jキーを押していて、かつ「燃料が残っている」なら飛べる
-        if (Input.GetKey(KeyCode.J) && currentJetFuel > 0)
+      // ▼▼▼ J: Jaunt (ワープ) ▼▼▼
+        if (Input.GetKeyDown(KeyCode.J) && Time.time >= nextWarpTime)
         {
             if (hasKeyJ)
             {
-                rb.linearVelocity = new Vector2(rb.linearVelocity.x, jetUpSpeed);
-                
-                // 燃料（残り時間）を減らす
-                currentJetFuel -= Time.deltaTime; 
+                TryWarp();
             }
         }
-
-        // 地面にいるときは、燃料を急速チャージ（満タンに戻す）
-        if (isGrounded)
-        {
-            currentJetFuel = maxJetDuration;
-        }
-        // ▲▲▲ ▲▲▲
-
         // 5. ダッシュ (D)
         if (Input.GetKeyDown(KeyCode.D) && canDash)
         {
@@ -129,6 +115,31 @@ public class PlayerController : MonoBehaviour
     }
 
     // --- 以下、変更なし ---
+void TryWarp()
+    {
+        // ワープしたい目的地を計算（向いている方向 × 距離）
+        Vector2 direction = Vector2.right * lastDirection;
+        Vector2 targetPos = (Vector2)transform.position + (direction * warpDistance);
+
+        // 安全確認：ワープ先が「壁の中」じゃないかチェック
+        // OverlapCircleで、目的地の半径0.2mに壁があるか調べる
+        Collider2D hitWall = Physics2D.OverlapCircle(targetPos, 0.2f, wallLayer);
+
+        if (hitWall == null) // 壁がなければワープ実行
+        {
+            transform.position = targetPos;
+            nextWarpTime = Time.time + warpCooldown;
+            
+            // ワープのエフェクトや音をここで出すと気持ちいい
+            Debug.Log("Jaunt! (ワープ成功)");
+        }
+        else
+        {
+            // 壁の中に突っ込むならワープ失敗（不発）
+            Debug.Log("壁の中にはワープできません！");
+        }
+    }
+
 
     void Attack()
     {
