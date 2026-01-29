@@ -4,25 +4,26 @@ using UnityEngine;
 public class PlayerController : MonoBehaviour
 {
     [Header("獲得したキー（能力）")]
-    // ▼▼▼ ここが今回のミソ！初期値は全部 false (ロック状態) ▼▼▼
     public bool hasKeyA = false; // Attack
-    public bool hasKeyJ = false; // Jump
+    public bool hasKeyJ = false; // Jet (旧 Jump から変更！)
     public bool hasKeyD = false; // Dash
-    private bool isAttacking = false; // ▼▼▼ 追加：攻撃中かどうかを管理するフラグ
-    public bool IsDashing()
-    {
-        return isDashing;
-    }
-    // ▲▲▲ ここまで ▲▲▲
-    // ▼▼▼ 追加：壁が「攻撃中？」と聞けるようにする
-    public bool IsAttacking()
-    {
-        return isAttacking;
-    }
+    
+    private bool isAttacking = false;
+    
+    // 外部から状態を確認するための関数
+    public bool IsDashing() { return isDashing; }
+    public bool IsAttacking() { return isAttacking; }
 
     [Header("移動・ジャンプ")]
     [SerializeField] private float moveSpeed = 5f;
     [SerializeField] private float jumpForce = 5f;
+
+    [Header("ジェット（J）設定")]
+    [SerializeField] private float jetUpSpeed = 5f; // 上昇力
+    // ▼▼▼ 追加：燃料の設定 ▼▼▼
+    [SerializeField] private float maxJetDuration = 1.0f; // 何秒飛べるか
+    private float currentJetFuel; // 今の残り燃料
+    // ▲▲▲ ▲▲▲
 
     [Header("ダッシュ設定")]
     [SerializeField] private float dashSpeed = 15f;
@@ -55,12 +56,13 @@ public class PlayerController : MonoBehaviour
         
         currentHP = maxHP;
         if (GameManager.instance != null) GameManager.instance.UpdateHP(currentHP);
+        // ▼▼▼ 追加：最初は燃料満タン ▼▼▼
+        currentJetFuel = maxJetDuration;
     }
 
     void Update()
     {
-        // ▼▼▼ 1. 攻撃 (A) を一番上に移動！ ▼▼▼
-        // これでダッシュ中でも攻撃ボタンが反応するようになります
+        // 1. 攻撃 (A)
         if (Input.GetKeyDown(KeyCode.A) && Time.time >= nextAttackTime)
         {
             if (hasKeyA)
@@ -74,13 +76,10 @@ public class PlayerController : MonoBehaviour
             }
         }
 
-        // ▼▼▼ 2. ここでダッシュ中のチェックを入れる ▼▼▼
-        // ダッシュ中なら、ここから下（移動やジャンプ）は実行させない
+        // ダッシュ中は移動・ジャンプ・ジェット操作を受け付けない
         if (isDashing) return;
 
-        // --- 以下、ダッシュしていない時だけできること ---
-
-        // 3. 移動 (矢印キー)
+        // 2. 移動 (矢印キー)
         float x = 0;
         if (Input.GetKey(KeyCode.RightArrow)) x = 1;
         if (Input.GetKey(KeyCode.LeftArrow))  x = -1;
@@ -88,18 +87,32 @@ public class PlayerController : MonoBehaviour
         if (x != 0) lastDirection = x;
         rb.linearVelocity = new Vector2(x * moveSpeed, rb.linearVelocity.y);
 
-        // 4. ジャンプ (J)
-        if (Input.GetKeyDown(KeyCode.J) && isGrounded)
+        // 3. ジャンプ (Space または ↑キー)
+        // ※これは基本アクションとして、キー制限なしにしています（必要なら制限を追加可能）
+        if ((Input.GetKeyDown(KeyCode.Space) || Input.GetKeyDown(KeyCode.UpArrow)) && isGrounded)
+        {
+            rb.AddForce(Vector2.up * jumpForce, ForceMode2D.Impulse);
+        }
+
+       // ▼▼▼ 4. ジェット (J) 燃料制限付き ▼▼▼
+        // Jキーを押していて、かつ「燃料が残っている」なら飛べる
+        if (Input.GetKey(KeyCode.J) && currentJetFuel > 0)
         {
             if (hasKeyJ)
             {
-                rb.AddForce(Vector2.up * jumpForce, ForceMode2D.Impulse);
-            }
-            else
-            {
-                Debug.Log("Jキーがない！ジャンプできない！");
+                rb.linearVelocity = new Vector2(rb.linearVelocity.x, jetUpSpeed);
+                
+                // 燃料（残り時間）を減らす
+                currentJetFuel -= Time.deltaTime; 
             }
         }
+
+        // 地面にいるときは、燃料を急速チャージ（満タンに戻す）
+        if (isGrounded)
+        {
+            currentJetFuel = maxJetDuration;
+        }
+        // ▲▲▲ ▲▲▲
 
         // 5. ダッシュ (D)
         if (Input.GetKeyDown(KeyCode.D) && canDash)
@@ -114,44 +127,36 @@ public class PlayerController : MonoBehaviour
             }
         }
     }
-    // ▼▼▼ Attack関数をこれに書き換え ▼▼▼
+
+    // --- 以下、変更なし ---
+
     void Attack()
     {
-        // コルーチン（時間差処理）を開始する
         StartCoroutine(PerformAttack());
         nextAttackTime = Time.time + attackRate;
     }
 
-    // ▼▼▼ 新しく追加する関数（攻撃の実体） ▼▼▼
     IEnumerator PerformAttack()
     {
-        isAttacking = true; // ▼▼▼ 追加：攻撃開始！フラグを立てる
+        isAttacking = true;
         StartCoroutine(FlashRed());
 
-        // 「攻撃ボタンを押した瞬間にダッシュしていたか？」を記憶
         bool isDashAttack = isDashing; 
         
         float timer = 0f;
-        float normalAttackDuration = 0.1f; // 通常攻撃の持続時間（一瞬）
+        float normalAttackDuration = 0.1f;
 
-        // 無限ループ（中で break して抜ける）
         while (true) 
         {
-            // ▼▼▼ 終了条件のチェック ▼▼▼
             if (isDashAttack)
             {
-                // ダッシュ攻撃の場合：ダッシュが終わったらループ終了
                 if (!isDashing) break;
             }
             else
             {
-                // 通常攻撃の場合：一定時間経ったらループ終了
                 if (timer > normalAttackDuration) break;
             }
-            // ▲▲▲ ▲▲▲
 
-
-            // --- 攻撃判定（いつものやつ） ---
             Vector2 attackPos = (Vector2)transform.position + (Vector2.right * lastDirection * 0.5f);
             Collider2D[] hitEnemies = Physics2D.OverlapCircleAll(attackPos, attackRange, enemyLayer);
 
@@ -163,12 +168,11 @@ public class PlayerController : MonoBehaviour
                     enemyScript.TakeDamage();
                 }
             }
-            // -----------------------------
 
             timer += Time.deltaTime;
             yield return null;
         }
-        isAttacking = false; // ▼▼▼ 追加：攻撃終了！フラグを降ろす
+        isAttacking = false;
     }
 
     public void TakeDamage(int damage)
@@ -199,22 +203,16 @@ public class PlayerController : MonoBehaviour
         float originalGravity = rb.gravityScale;
         rb.gravityScale = 0f;
 
-        // ▼▼▼ ここから変更（whileループにする） ▼▼▼
-        float startTime = Time.time; // 開始時間を記録
+        float startTime = Time.time; 
 
-        // 「ダッシュ時間が経過するまで」ずっとループして速度を強制し続ける
         while (Time.time < startTime + dashTime)
         {
-            // 毎フレーム「この速度で進め！」と命令し続ける
-            // これにより、壁にぶつかって物理演算で止まりそうになっても、無理やり進みます
             rb.linearVelocity = new Vector2(lastDirection * dashSpeed, 0f);
-
-            yield return null; // 1フレーム待つ
+            yield return null; 
         }
-        // ▲▲▲ ここまで変更 ▲▲▲
 
         rb.gravityScale = originalGravity;
-        rb.linearVelocity = Vector2.zero; // ダッシュ後はピタッと止まる
+        rb.linearVelocity = Vector2.zero;
         isDashing = false;
 
         yield return new WaitForSeconds(dashCooldown);
@@ -231,11 +229,10 @@ public class PlayerController : MonoBehaviour
         if (collision.gameObject.CompareTag("Ground")) isGrounded = false;
     }
     
-    // 外部からキーを渡すための関数（後でアイテム取得時に使います）
     public void UnlockKey(string keyName)
     {
         if (keyName == "A") hasKeyA = true;
-        if (keyName == "J") hasKeyJ = true;
+        if (keyName == "J") hasKeyJ = true; // Jet 解放
         if (keyName == "D") hasKeyD = true;
         Debug.Log("キー [" + keyName + "] を取り戻した！");
     }
