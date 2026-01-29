@@ -2,9 +2,15 @@ using UnityEngine;
 
 public class Enemy : MonoBehaviour
 {
+    // ▼▼▼ 追加：動き出す距離の設定 ▼▼▼
+    [Header("感知範囲")]
+    [SerializeField] private float activeRange = 15f; // この距離より遠いと動かない
+    // ▲▲▲ ここまで ▲▲▲
     [SerializeField] private float speed = 2f; // 敵の移動速度
     private Transform player; // プレイヤーの位置情報
     private Rigidbody2D rb;
+
+
 
     void Start()
     {
@@ -22,6 +28,23 @@ public class Enemy : MonoBehaviour
     {
         // プレイヤーが見つからなかったら（死んでたりしたら）何もしない
         if (player == null) return;
+
+// ▼▼▼ 追加：距離チェックのロジック ▼▼▼
+        // プレイヤーとの距離を測る
+        float dist = Vector2.Distance(transform.position, player.position);
+
+        // もし「設定した距離」より遠かったら
+        if (dist > activeRange)
+        {
+            rb.simulated = false; // 物理演算をOFF（空中で止まる）
+            return;               // ここで処理を中断（下の移動コードを実行させない）
+        }
+        else
+        {
+            rb.simulated = true;  // 近づいたら物理演算をON（動き出す）
+        }
+        // ▲▲▲ ここまで追加 ▲▲▲
+
 
         // 1. 方向を決める（偏差 = 目標 - 現在地）
         // プレイヤーが右にいれば +、左にいれば - の値になる

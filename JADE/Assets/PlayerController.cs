@@ -8,7 +8,17 @@ public class PlayerController : MonoBehaviour
     public bool hasKeyA = false; // Attack
     public bool hasKeyJ = false; // Jump
     public bool hasKeyD = false; // Dash
+    private bool isAttacking = false; // ▼▼▼ 追加：攻撃中かどうかを管理するフラグ
+    public bool IsDashing()
+    {
+        return isDashing;
+    }
     // ▲▲▲ ここまで ▲▲▲
+    // ▼▼▼ 追加：壁が「攻撃中？」と聞けるようにする
+    public bool IsAttacking()
+    {
+        return isAttacking;
+    }
 
     [Header("移動・ジャンプ")]
     [SerializeField] private float moveSpeed = 5f;
@@ -49,44 +59,8 @@ public class PlayerController : MonoBehaviour
 
     void Update()
     {
-        if (isDashing) return;
-
-        // --- 1. 移動 (矢印キーは基本機能として最初から開放) ---
-        float x = 0;
-        if (Input.GetKey(KeyCode.RightArrow)) x = 1;
-        if (Input.GetKey(KeyCode.LeftArrow))  x = -1;
-
-        if (x != 0) lastDirection = x;
-        rb.linearVelocity = new Vector2(x * moveSpeed, rb.linearVelocity.y);
-
-        // --- 2. ジャンプ (J) ---
-        // 「地面にいる」かつ「Jキー所持」なら飛べる
-        if (Input.GetKeyDown(KeyCode.J) && isGrounded)
-        {
-            if (hasKeyJ)
-            {
-                rb.AddForce(Vector2.up * jumpForce, ForceMode2D.Impulse);
-            }
-            else
-            {
-                Debug.Log("Jキーがない！ジャンプできない！");
-            }
-        }
-
-        // --- 3. ダッシュ (D) ---
-        if (Input.GetKeyDown(KeyCode.D) && canDash)
-        {
-            if (hasKeyD)
-            {
-                StartCoroutine(Dash());
-            }
-            else
-            {
-                Debug.Log("Dキーがない！ダッシュできない！");
-            }
-        }
-
-        // --- 4. 攻撃 (A) ---
+        // ▼▼▼ 1. 攻撃 (A) を一番上に移動！ ▼▼▼
+        // これでダッシュ中でも攻撃ボタンが反応するようになります
         if (Input.GetKeyDown(KeyCode.A) && Time.time >= nextAttackTime)
         {
             if (hasKeyA)
@@ -99,22 +73,102 @@ public class PlayerController : MonoBehaviour
                 Debug.Log("Aキーがない！攻撃できない！");
             }
         }
-    }
 
-    void Attack()
-    {
-        StartCoroutine(FlashRed());
-        Vector2 attackPos = (Vector2)transform.position + (Vector2.right * lastDirection * 0.5f);
-        Collider2D[] hitEnemies = Physics2D.OverlapCircleAll(attackPos, attackRange, enemyLayer);
+        // ▼▼▼ 2. ここでダッシュ中のチェックを入れる ▼▼▼
+        // ダッシュ中なら、ここから下（移動やジャンプ）は実行させない
+        if (isDashing) return;
 
-        foreach (Collider2D enemy in hitEnemies)
+        // --- 以下、ダッシュしていない時だけできること ---
+
+        // 3. 移動 (矢印キー)
+        float x = 0;
+        if (Input.GetKey(KeyCode.RightArrow)) x = 1;
+        if (Input.GetKey(KeyCode.LeftArrow))  x = -1;
+
+        if (x != 0) lastDirection = x;
+        rb.linearVelocity = new Vector2(x * moveSpeed, rb.linearVelocity.y);
+
+        // 4. ジャンプ (J)
+        if (Input.GetKeyDown(KeyCode.J) && isGrounded)
         {
-            Enemy enemyScript = enemy.GetComponent<Enemy>();
-            if (enemyScript != null)
+            if (hasKeyJ)
             {
-                enemyScript.TakeDamage();
+                rb.AddForce(Vector2.up * jumpForce, ForceMode2D.Impulse);
+            }
+            else
+            {
+                Debug.Log("Jキーがない！ジャンプできない！");
             }
         }
+
+        // 5. ダッシュ (D)
+        if (Input.GetKeyDown(KeyCode.D) && canDash)
+        {
+            if (hasKeyD)
+            {
+                StartCoroutine(Dash());
+            }
+            else
+            {
+                Debug.Log("Dキーがない！ダッシュできない！");
+            }
+        }
+    }
+    // ▼▼▼ Attack関数をこれに書き換え ▼▼▼
+    void Attack()
+    {
+        // コルーチン（時間差処理）を開始する
+        StartCoroutine(PerformAttack());
+        nextAttackTime = Time.time + attackRate;
+    }
+
+    // ▼▼▼ 新しく追加する関数（攻撃の実体） ▼▼▼
+    IEnumerator PerformAttack()
+    {
+        isAttacking = true; // ▼▼▼ 追加：攻撃開始！フラグを立てる
+        StartCoroutine(FlashRed());
+
+        // 「攻撃ボタンを押した瞬間にダッシュしていたか？」を記憶
+        bool isDashAttack = isDashing; 
+        
+        float timer = 0f;
+        float normalAttackDuration = 0.1f; // 通常攻撃の持続時間（一瞬）
+
+        // 無限ループ（中で break して抜ける）
+        while (true) 
+        {
+            // ▼▼▼ 終了条件のチェック ▼▼▼
+            if (isDashAttack)
+            {
+                // ダッシュ攻撃の場合：ダッシュが終わったらループ終了
+                if (!isDashing) break;
+            }
+            else
+            {
+                // 通常攻撃の場合：一定時間経ったらループ終了
+                if (timer > normalAttackDuration) break;
+            }
+            // ▲▲▲ ▲▲▲
+
+
+            // --- 攻撃判定（いつものやつ） ---
+            Vector2 attackPos = (Vector2)transform.position + (Vector2.right * lastDirection * 0.5f);
+            Collider2D[] hitEnemies = Physics2D.OverlapCircleAll(attackPos, attackRange, enemyLayer);
+
+            foreach (Collider2D enemy in hitEnemies)
+            {
+                Enemy enemyScript = enemy.GetComponent<Enemy>();
+                if (enemyScript != null)
+                {
+                    enemyScript.TakeDamage();
+                }
+            }
+            // -----------------------------
+
+            timer += Time.deltaTime;
+            yield return null;
+        }
+        isAttacking = false; // ▼▼▼ 追加：攻撃終了！フラグを降ろす
     }
 
     public void TakeDamage(int damage)
@@ -144,11 +198,25 @@ public class PlayerController : MonoBehaviour
         canDash = false;
         float originalGravity = rb.gravityScale;
         rb.gravityScale = 0f;
-        rb.linearVelocity = new Vector2(lastDirection * dashSpeed, 0f);
-        yield return new WaitForSeconds(dashTime);
+
+        // ▼▼▼ ここから変更（whileループにする） ▼▼▼
+        float startTime = Time.time; // 開始時間を記録
+
+        // 「ダッシュ時間が経過するまで」ずっとループして速度を強制し続ける
+        while (Time.time < startTime + dashTime)
+        {
+            // 毎フレーム「この速度で進め！」と命令し続ける
+            // これにより、壁にぶつかって物理演算で止まりそうになっても、無理やり進みます
+            rb.linearVelocity = new Vector2(lastDirection * dashSpeed, 0f);
+
+            yield return null; // 1フレーム待つ
+        }
+        // ▲▲▲ ここまで変更 ▲▲▲
+
         rb.gravityScale = originalGravity;
-        rb.linearVelocity = Vector2.zero;
+        rb.linearVelocity = Vector2.zero; // ダッシュ後はピタッと止まる
         isDashing = false;
+
         yield return new WaitForSeconds(dashCooldown);
         canDash = true;
     }
